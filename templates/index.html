@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IA de Ajedrez</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin-top: 20px;
+        }
+        #board {
+            width: 400px;
+            height: 400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+        }
+        .square {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 35px;
+        }
+        .white-square { background-color: #f0d9b5; }
+        .black-square { background-color: #b58863; }
+        .white-piece { color: white; text-shadow: 1px 1px 2px #000; }
+        .black-piece { color: black; text-shadow: 1px 1px 2px #fff; }
+        .piece { cursor: grab; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        #status { margin: 15px 0; font-weight: bold; }
+        #check-status {
+            font-size: 20px;
+            color: red;
+            font-weight: bold;
+        }
+        #score {
+            font-size: 18px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>♟️ IA de Ajedrez ♟️</h1>
+    <div id="board"></div>
+    <p id="status">Juego en progreso...</p>
+    <p id="check-status"></p> <!-- Aquí se mostrará el mensaje de Jaque o Jaque Mate -->
+    <div id="score">
+        <span id="player-score">Jugador: 0</span> |
+        <span id="ai-score">IA: 0</span>
+    </div>
+    <button id="reset">Reiniciar Juego</button>
+
+    <script>
+        // Configuración de piezas
+        const pieceIcons = {
+            'K': 'chess-king', 'Q': 'chess-queen', 'R': 'chess-rook',
+            'B': 'chess-bishop', 'N': 'chess-knight', 'P': 'chess-pawn'
+        };
+
+        // Variables globales
+        let selectedSquare = null;
+        let fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR'; // FEN inicial
+        let playerWins = 0;
+        let aiWins = 0;
+
+        // Inicializar tablero
+        function initBoard() {
+            const board = document.getElementById('board');
+            board.innerHTML = '';  // Limpiar el tablero antes de regenerarlo
+
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const square = document.createElement('div');
+                    square.className = (row + col) % 2 === 0 ? 'square white-square' : 'square black-square';
+                    square.dataset.pos = String.fromCharCode(97 + col) + (8 - row);
+                    square.addEventListener('click', handleSquareClick);
+                    board.appendChild(square);
+                }
+            }
+            updateBoard(fen);
+        }
+
+        // Actualizar tablero desde FEN
+        function updateBoard(fen) {
+            document.querySelectorAll('.square').forEach(sq => sq.innerHTML = '');
+            
+            const rows = fen.split(' ')[0].split('/');
+            
+            rows.forEach((row, i) => {
+                let col = 0;
+                for (const char of row) {
+                    if (!isNaN(char)) {
+                        col += parseInt(char);
+                    } else {
+                        const square = document.querySelector(`.square[data-pos="${String.fromCharCode(97 + col) + (8 - i)}"]`);
+                        if (square) {
+                            const isWhite = char === char.toUpperCase();
+                            square.innerHTML = `
+                                <div class="piece ${isWhite ? 'white-piece' : 'black-piece'}">
+                                    <i class="fas fa-${pieceIcons[char.toUpperCase()]}"></i>
+                                </div>
+                            `;
+                        }
+                        col++;
+                    }
+                }
+            });
+        }
+
+        // Lógica de movimientos
+        async function handleSquareClick(e) {
+    const square = e.currentTarget;
+    const position = square.dataset.pos;
+    
+    if (!selectedSquare) {
+        // Seleccionar pieza
+        if (square.firstChild) {
+            selectedSquare = position;
+            square.style.backgroundColor = '#8bb381';
+        }
+    } else {
+        // Mover pieza
+        const from = selectedSquare;
+        const to = position;
+        selectedSquare = null;
+        
+        // Restablecer colores del tablero
+        document.querySelectorAll('.square').forEach(sq => {
+            sq.style.backgroundColor = sq.classList.contains('white-square') ? '#f0d9b5' : '#b58863';
+        });
+
+        try {
+            const response = await fetch("/move", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ move: from + to })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            // Actualizar estado del juego
+            if (data.game_over) {
+                const resultMessage = data.result === '1-0' ? '¡Ganaste!' : 
+                                    data.result === '0-1' ? 'La IA ganó' : 'Empate';
+                document.getElementById("status").innerText = `Juego terminado: ${resultMessage}`;
+                
+                if (data.result === '1-0') playerWins++;
+                else if (data.result === '0-1') aiWins++;
+                updateScore();
+            }
+
+            if (data.checkmate) {
+                document.getElementById("check-status").innerText = "¡Jaque Mate!";
+            } else if (data.check) {
+                document.getElementById("check-status").innerText = "¡Jaque!";
+            } else {
+                document.getElementById("check-status").innerText = '';
+            }
+
+            if (data.fen) {
+                fen = data.fen;
+                updateBoard(fen);
+            }
+
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Error al procesar el movimiento');
+        }
+    }
+}
+        // Actualizar marcador
+        function updateScore() {
+            document.getElementById('player-score').innerText = `Jugador: ${playerWins}`;
+            document.getElementById('ai-score').innerText = `IA: ${aiWins}`;
+        }
+
+        // Reiniciar juego
+        document.getElementById('reset').addEventListener('click', async () => {
+            try {
+                await fetch("/reset", { method: "POST" });
+                fen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR'; // Reiniciar FEN
+                document.getElementById("check-status").innerText = ''; // Limpiar mensaje de Jaque o Jaque Mate
+                initBoard();
+                document.getElementById("status").innerText = "Juego en progreso...";
+            } catch (error) {
+                console.error('Error al reiniciar el juego:', error);
+            }
+        });
+
+        // Iniciar al cargar
+        document.addEventListener('DOMContentLoaded', initBoard);
+    </script>
+</body>
+</html>
